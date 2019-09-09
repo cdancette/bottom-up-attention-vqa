@@ -4,6 +4,7 @@ from attention import Attention, NewAttention
 from language_model import WordEmbedding, QuestionEmbedding
 from classifier import SimpleClassifier
 from fc import FCNet
+import numpy as np
 
 
 class BaseModel(nn.Module):
@@ -15,8 +16,11 @@ class BaseModel(nn.Module):
         self.q_net = q_net
         self.v_net = v_net
         self.classifier = classifier
+        self.debias_loss_fn = None
+        # self.bias_scale = torch.nn.Parameter(torch.from_numpy(np.ones((1, ), dtype=np.float32)*1.2))
+        self.bias_lin = torch.nn.Linear(1024, 1)
 
-    def forward(self, v, b, q, labels):
+    def forward(self, v, _, q, labels, bias, return_weights=False):
         """Forward
 
         v: [batch, num_objs, obj_dim]
@@ -35,7 +39,14 @@ class BaseModel(nn.Module):
         v_repr = self.v_net(v_emb)
         joint_repr = q_repr * v_repr
         logits = self.classifier(joint_repr)
-        return logits
+
+        if labels is not None:
+          if return_weights:
+            return self.debias_loss_fn(joint_repr, logits, bias, labels, True)
+          loss = self.debias_loss_fn(joint_repr, logits, bias, labels)
+        else:
+          loss = None
+        return logits, loss
 
 
 def build_baseline0(dataset, num_hid):

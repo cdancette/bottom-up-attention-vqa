@@ -1,4 +1,6 @@
 from __future__ import print_function
+
+import argparse
 import os
 import sys
 import json
@@ -134,9 +136,7 @@ def filter_answers(answers_dset, min_occurence):
     """This will change the answer to preprocessed version
     """
     occurence = {}
-
     for ans_entry in answers_dset:
-        answers = ans_entry['answers']
         gtruth = ans_entry['multiple_choice_answer']
         gtruth = preprocess_answer(gtruth)
         if gtruth not in occurence:
@@ -151,7 +151,7 @@ def filter_answers(answers_dset, min_occurence):
     return occurence
 
 
-def create_ans2label(occurence, name, cache_root='data/cache'):
+def create_ans2label(occurence, name, cache_root):
     """Note that this will also create label2ans.pkl at the same time
 
     occurence: dict {answer -> whatever}
@@ -175,7 +175,7 @@ def create_ans2label(occurence, name, cache_root='data/cache'):
     return ans2label
 
 
-def compute_target(answers_dset, ans2label, name, cache_root='data/cache'):
+def compute_target(answers_dset, ans2label, name, cache_root):
     """Augment answers_dset with soft score as label
 
     ***answers_dset should be preprocessed***
@@ -199,16 +199,26 @@ def compute_target(answers_dset, ans2label, name, cache_root='data/cache'):
             score = get_score(answer_count[answer])
             scores.append(score)
 
+        label_counts = {}
+        for k, v in answer_count.items():
+            if k in ans2label:
+                label_counts[ans2label[k]] = v
+
         target.append({
             'question_id': ans_entry['question_id'],
+            'question_type': ans_entry['question_type'],
             'image_id': ans_entry['image_id'],
+            'label_counts': label_counts,
             'labels': labels,
             'scores': scores
         })
 
+    print(cache_root)
     utils.create_dir(cache_root)
     cache_file = os.path.join(cache_root, name+'_target.pkl')
-    cPickle.dump(target, open(cache_file, 'wb'))
+    print(cache_file)
+    with open(cache_file, 'wb') as f:
+      cPickle.dump(target, f)
     return target
 
 
@@ -224,21 +234,45 @@ def get_question(qid, questions):
             return question
 
 
-if __name__ == '__main__':
+def load_cp():
+    train_answer_file = "data/vqacp_v2_train_annotations.json"
+    with open(train_answer_file) as f:
+        train_answers = json.load(f)  # ['annotations']
+
+    val_answer_file = "data/vqacp_v2_test_annotations.json"
+    with open(val_answer_file) as f:
+        val_answers = json.load(f)  # ['annotations']
+
+    occurence = filter_answers(train_answers, 9)
+    ans2label = create_ans2label(occurence, 'trainval', "data/cp-cache")
+    compute_target(train_answers, ans2label, 'train', "data/cp-cache")
+    compute_target(val_answers, ans2label, 'val', "data/cp-cache")
+
+
+def load_v2():
     train_answer_file = 'data/v2_mscoco_train2014_annotations.json'
-    train_answers = json.load(open(train_answer_file))['annotations']
+    with open(train_answer_file) as f:
+        train_answers = json.load(f)['annotations']
 
     val_answer_file = 'data/v2_mscoco_val2014_annotations.json'
-    val_answers = json.load(open(val_answer_file))['annotations']
+    with open(val_answer_file) as f:
+        val_answers = json.load(f)['annotations']
 
-    train_question_file = 'data/v2_OpenEnded_mscoco_train2014_questions.json'
-    train_questions = json.load(open(train_question_file))['questions']
+    occurence = filter_answers(train_answers, 9)
+    ans2label = create_ans2label(occurence, 'trainval', "data/cache")
+    compute_target(train_answers, ans2label, 'train', "data/cache")
+    compute_target(val_answers, ans2label, 'val', "data/cache")
 
-    val_question_file = 'data/v2_OpenEnded_mscoco_val2014_questions.json'
-    val_questions = json.load(open(val_question_file))['questions']
 
-    answers = train_answers + val_answers
-    occurence = filter_answers(answers, 9)
-    ans2label = create_ans2label(occurence, 'trainval')
-    compute_target(train_answers, ans2label, 'train')
-    compute_target(val_answers, ans2label, 'val')
+def main():
+    parser = argparse.ArgumentParser("Dataset preprocessing")
+    parser.add_argument("dataset", choices=["cp_v2", "v2"])
+    args = parser.parse_args()
+    if args.dataset == "v2":
+        load_v2()
+    else:
+        load_cp()
+
+
+if __name__ == '__main__':
+    main()

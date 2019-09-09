@@ -2,12 +2,14 @@ from __future__ import print_function
 import os
 import json
 import cPickle
+from collections import Counter
+
 import numpy as np
 import utils
 import h5py
 import torch
 from torch.utils.data import Dataset
-
+from tqdm import tqdm
 
 class Dictionary(object):
     def __init__(self, word2idx=None, idx2word=None):
@@ -60,71 +62,112 @@ class Dictionary(object):
         return len(self.idx2word)
 
 
-def _create_entry(img, question, answer):
+def _create_entry(img_idx, question, answer):
     answer.pop('image_id')
     answer.pop('question_id')
     entry = {
         'question_id' : question['question_id'],
         'image_id'    : question['image_id'],
-        'image'       : img,
+        'image_idx'       : img_idx,
         'question'    : question['question'],
-        'answer'      : answer}
+        'answer'      : answer
+    }
     return entry
 
 
-def _load_dataset(dataroot, name, img_id2val):
+def _load_dataset(dataroot, name, img_id2val, cp=False):
     """Load entries
 
     img_id2val: dict {img_id -> val} val can be used to retrieve image or features
     dataroot: root path of dataset
     name: 'train', 'val'
     """
-    question_path = os.path.join(
-        dataroot, 'v2_OpenEnded_mscoco_%s2014_questions.json' % name)
-    questions = sorted(json.load(open(question_path))['questions'],
-                       key=lambda x: x['question_id'])
-    answer_path = os.path.join(dataroot, 'cache', '%s_target.pkl' % name)
-    answers = cPickle.load(open(answer_path, 'rb'))
-    answers = sorted(answers, key=lambda x: x['question_id'])
+    if cp:
+      answer_path = os.path.join(dataroot, 'cp-cache', '%s_target.pkl' % name)
+      name = "train" if name == "train" else "test"
+      question_path = os.path.join(dataroot, 'vqacp_v2_%s_questions.json' % name)
+      with open(question_path) as f:
+        questions = json.load(f)
+    else:
+      question_path = os.path.join(
+          dataroot, 'v2_OpenEnded_mscoco_%s2014_questions.json' % name)
+      with open(question_path) as f:
+        questions = json.load(f)["questions"]
+      answer_path = os.path.join(dataroot, 'cache', '%s_target.pkl' % name)
+
+    questions.sort(key=lambda x: x['question_id'])
+    with open(answer_path, 'rb') as f:
+      answers = cPickle.load(f)
+    answers.sort(key=lambda x: x['question_id'])
 
     utils.assert_eq(len(questions), len(answers))
     entries = []
     for question, answer in zip(questions, answers):
+        if answer["labels"] is None:
+            raise ValueError()
         utils.assert_eq(question['question_id'], answer['question_id'])
         utils.assert_eq(question['image_id'], answer['image_id'])
         img_id = question['image_id']
-        entries.append(_create_entry(img_id2val[img_id], question, answer))
+        img_idx = None
+        if img_id2val:
+          img_idx = img_id2val[img_id]
 
+        entries.append(_create_entry(img_idx, question, answer))
     return entries
 
 
 class VQAFeatureDataset(Dataset):
-    def __init__(self, name, dictionary, dataroot='data'):
+    def __init__(self, name, dictionary, dataroot='data', cp=False,
+                 use_hdf5=False, cache_image_features=False):
         super(VQAFeatureDataset, self).__init__()
         assert name in ['train', 'val']
 
-        ans2label_path = os.path.join(dataroot, 'cache', 'trainval_ans2label.pkl')
-        label2ans_path = os.path.join(dataroot, 'cache', 'trainval_label2ans.pkl')
+        if cp:
+            ans2label_path = os.path.join(dataroot, 'cp-cache', 'trainval_ans2label.pkl')
+            label2ans_path = os.path.join(dataroot, 'cp-cache', 'trainval_label2ans.pkl')
+        else:
+            ans2label_path = os.path.join(dataroot, 'cache', 'trainval_ans2label.pkl')
+            label2ans_path = os.path.join(dataroot, 'cache', 'trainval_label2ans.pkl')
         self.ans2label = cPickle.load(open(ans2label_path, 'rb'))
         self.label2ans = cPickle.load(open(label2ans_path, 'rb'))
         self.num_ans_candidates = len(self.ans2label)
 
         self.dictionary = dictionary
+        self.use_hdf5 = use_hdf5
 
-        self.img_id2idx = cPickle.load(
-            open(os.path.join(dataroot, '%s36_imgid2idx.pkl' % name)))
-        print('loading features from h5 file')
-        h5_path = os.path.join(dataroot, '%s36.hdf5' % name)
-        with h5py.File(h5_path, 'r') as hf:
-            self.features = np.array(hf.get('image_features'))
-            self.spatials = np.array(hf.get('spatial_features'))
+        if use_hdf5:
+            h5_path = os.path.join(dataroot, 'trainval36.hdf5')
+            self.hf = h5py.File(h5_path, 'r')
+            self.features = self.hf.get('image_features')
 
-        self.entries = _load_dataset(dataroot, name, self.img_id2idx)
+            with open("data/trainval36_imgid2idx.pkl", "rb") as f:
+                imgid2idx = cPickle.load(f)
+        else:
+            imgid2idx = None
+
+        self.entries = _load_dataset(dataroot, name, imgid2idx, cp=cp)
+
+        if cache_image_features:
+            image_to_fe = {}
+            for entry in tqdm(self.entries, ncols=100, desc="caching-features"):
+                img_id = entry["image_id"]
+                if img_id not in image_to_fe:
+                    if use_hdf5:
+                        fe = np.array(self.features[imgid2idx[img_id]])
+                    else:
+                        fe = np.fromfile("data/trainval_features/" + str(img_id) + ".bin", np.float32)
+
+                    image_to_fe[img_id] = torch.from_numpy(fe).view(36, 2048)
+            self.image_to_fe = image_to_fe
+            if use_hdf5:
+                self.hf.close()
+        else:
+            self.image_to_fe = None
 
         self.tokenize()
         self.tensorize()
-        self.v_dim = self.features.size(2)
-        self.s_dim = self.spatials.size(2)
+
+        self.v_dim = 2048
 
     def tokenize(self, max_length=14):
         """Tokenizes the questions.
@@ -132,7 +175,7 @@ class VQAFeatureDataset(Dataset):
         This will add q_token in each entry of the dataset.
         -1 represent nil, and should be treated as padding_idx in embedding
         """
-        for entry in self.entries:
+        for entry in tqdm(self.entries, ncols=100, desc="tokenize"):
             tokens = self.dictionary.tokenize(entry['question'], False)
             tokens = tokens[:max_length]
             if len(tokens) < max_length:
@@ -143,10 +186,7 @@ class VQAFeatureDataset(Dataset):
             entry['q_token'] = tokens
 
     def tensorize(self):
-        self.features = torch.from_numpy(self.features)
-        self.spatials = torch.from_numpy(self.spatials)
-
-        for entry in self.entries:
+        for entry in tqdm(self.entries, ncols=100, desc="tensorize"):
             question = torch.from_numpy(np.array(entry['q_token']))
             entry['q_token'] = question
 
@@ -164,8 +204,14 @@ class VQAFeatureDataset(Dataset):
 
     def __getitem__(self, index):
         entry = self.entries[index]
-        features = self.features[entry['image']]
-        spatials = self.spatials[entry['image']]
+        if self.image_to_fe is not None:
+            features = self.image_to_fe[entry["image_id"]]
+        elif self.use_hdf5:
+            features = np.array(self.features[entry['image_idx']])
+            features = torch.from_numpy(features).view(36, 2048)
+        else:
+            features = np.fromfile("data/trainval_features/" + str(entry["image_id"]) + ".data", np.float32)
+            features = torch.from_numpy(features).view(36, 2048)
 
         question = entry['q_token']
         answer = entry['answer']
@@ -175,7 +221,10 @@ class VQAFeatureDataset(Dataset):
         if labels is not None:
             target.scatter_(0, labels, scores)
 
-        return features, spatials, question, target
+        if "bias" in entry:
+            return features, question, target, entry["bias"]
+        else:
+            return features, question, target, 0
 
     def __len__(self):
         return len(self.entries)
