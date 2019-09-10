@@ -1,5 +1,5 @@
 ## Debiasing the BottomUpTopDown Model for Visual Question Answering
-This repo contains code to run the VQA-CP experiments from our paper ["Don’t Take the Easy Way Out: Ensemble Based Methods for Avoiding Known Dataset Biases"](TDB).
+This repo contains code to run the VQA-CP experiments from our paper ["Don’t Take the Easy Way Out: Ensemble Based Methods for Avoiding Known Dataset Biases"](https://arxiv.org/abs/1909.03683).
 In particular, it contains code to a train VQA model so that it does
 not make use of question-type priors when answering questions, and evaluate it on [VQA-CP v2.0](https://www.cc.gatech.edu/~aagrawal307/vqa-cp/).
 
