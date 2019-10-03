@@ -77,7 +77,7 @@ def train(model, train_loader, eval_loader, num_epochs, output, eval_each_epoch)
             eval_score = results["score"]
             bound = results["upper_bound"]
 
-        logger.write('epoch %d, time: %.2f' % (epoch, time.time()-t))
+        logger.write('epoch %d, time: %.2f' % (epoch+1, time.time()-t))
         logger.write('\ttrain_loss: %.2f, score: %.2f' % (total_loss, train_score))
 
         if run_eval:
