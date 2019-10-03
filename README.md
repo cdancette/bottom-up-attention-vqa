@@ -37,15 +37,37 @@ sudo apt update
 sudo apt install unzip
 sudo apt install python-pip
 pip2 install torch==0.3.1
-pip2 install h5py, tqdm, pillow 
+pip2 install h5py tqdm pillow 
 bash tools/download.sh
 bash tools/process.sh
 ```
 
 ### Training
 
-Run `python main.py --output_dir /path/to/output --seed 0` to start training our learned-mixin +H VQA-CP model, see the command line options
+Run `python main.py --output_dir /path/to/output --seed 0` to start training our Learned-Mixin +H VQA-CP model, see the command line options
 for how to use other ensemble method, or how to train on non-changing priors VQA 2.0.
+
+### Testing
+The scores reported by the script are very close (within a hundredth of a percent in my experience) to the results
+reported by the official evaluation metric, but can be slightly different because the 
+answer normalization process of the official script is not fully accounted for.
+To get the official numbers, you can run `python save_predictions.py /path/to/model /path/to/output_file`
+and the run the official VQA 2.0 evaluation [script](https://github.com/GT-Vision-Lab/VQA/blob/master/PythonEvaluationTools/vqaEvalDemo.py)
+on the resulting file.
+
+### Results by Answer Type
+We present a breakdown of accuracy by answer type below. The overall accuracies do not precisely 
+match the results in the paper because, due to a checkpointing issue, we had to re-run our experiments to
+get these numbers. The results are still averaged over eight runs, and are very close to the numbers in the 
+paper. 
+
+| Debiasing Method | Overall | Yes/No | Number | Other |
+| --- | --- | --- | --- | --- |
+|None|39.337|42.134|12.293|45.291|
+|Reweight|39.915|44.307|12.521|45.130|
+|Bias Product|40.043|43.395|12.322|45.892|
+|Learned-Mixin|48.778|72.780|14.608|45.576|
+|Learned-Mixin +H|52.013|72.580|31.117|46.968|
 
 
 ### Code Changes
