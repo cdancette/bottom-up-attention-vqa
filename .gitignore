@@ -1,12 +1,4 @@
-data
+.idea
 *.pyc
 *.ipynb
-logs/
-new_logs/
-task.sh
-*.npy
-*.pth
-new_logs*
-*.txt
-models/
-saved_models/
+data
