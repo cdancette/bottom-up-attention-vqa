@@ -69,6 +69,18 @@ paper.
 |Learned-Mixin|48.778|72.780|14.608|45.576|
 |Learned-Mixin +H|52.013|72.580|31.117|46.968|
 
+### VQA 2.0 Results
+We present scores for our methods on VQA 2.0, these were collected by re-training 
+the models on the VQA 2.0 train set and testing on the validation set. 
+Results are again averaged over eight runs.
+
+| Debiasing Method | Overall | Yes/No | Number | Other |
+| --- | --- | --- | --- | --- |
+|None|63.377|81.170|42.501|55.373|
+|Reweight|62.409|79.506|41.835|54.857|
+|Bias Product|63.207|81.016|42.302|55.199|
+|Learned-Mixin|63.260|81.159|42.215|55.221|
+|Learned-Mixin +H|56.345|65.057|37.631|54.687|
 
 ### Code Changes
 In general we have tried to minimizes changes to the original codebase to reduce the risk of adding bugs, the main changes are:
