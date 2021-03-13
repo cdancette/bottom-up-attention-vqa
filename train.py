@@ -10,7 +10,7 @@ import utils
 from torch.autograd import Variable
 import numpy as np
 from tqdm import tqdm
-
+import wandb
 
 def compute_score_with_logits(logits, labels):
     logits = torch.max(logits, 1)[1].data # argmax
@@ -34,8 +34,8 @@ def train(model, train_loader, eval_loader, num_epochs, output, eval_each_epoch)
 
         t = time.time()
 
-        for i, (v, q, a, b) in tqdm(enumerate(train_loader), ncols=100,
-                                    desc="Epoch %d" % (epoch+1), total=len(train_loader)):
+        for i, (v, q, a, b, qid) in tqdm(enumerate(train_loader),
+                                    desc="Epoch %d" % (epoch), total=len(train_loader)):
             total_step += 1
             v = Variable(v).cuda()
             q = Variable(q).cuda()
@@ -51,9 +51,10 @@ def train(model, train_loader, eval_loader, num_epochs, output, eval_each_epoch)
             optim.step()
             optim.zero_grad()
 
-            batch_score = compute_score_with_logits(pred, a.data).sum()
-            total_loss += loss.data[0] * v.size(0)
+            batch_score = compute_score_with_logits(pred, a.data).sum().item()
+            total_loss += loss.item() * v.size(0)
             train_score += batch_score
+            wandb.log({"train_loss_batch": total_loss})
 
         total_loss /= len(train_loader.dataset)
         train_score = 100 * train_score / len(train_loader.dataset)
@@ -62,8 +63,8 @@ def train(model, train_loader, eval_loader, num_epochs, output, eval_each_epoch)
 
         if run_eval:
             model.train(False)
-            results = evaluate(model, eval_loader)
-            results["epoch"] = epoch+1
+            results, predictions = evaluate(model, eval_loader)
+            results["epoch"] = epoch
             results["step"] = total_step
             results["train_loss"] = total_loss
             results["train_score"] = train_score
@@ -71,13 +72,17 @@ def train(model, train_loader, eval_loader, num_epochs, output, eval_each_epoch)
 
             with open(join(output, "results.json"), "w") as f:
                 json.dump(all_results, f, indent=2)
-
+            
+            with open(join(output, f"predictions-{epoch}.json"), "w") as f:
+                json.dump(predictions, f, indent=2)
+    
             model.train(True)
+            wandb.log(results)
 
             eval_score = results["score"]
             bound = results["upper_bound"]
 
-        logger.write('epoch %d, time: %.2f' % (epoch+1, time.time()-t))
+        logger.write('epoch %d, time: %.2f' % (epoch, time.time()-t))
         logger.write('\ttrain_loss: %.2f, score: %.2f' % (total_loss, train_score))
 
         if run_eval:
@@ -91,10 +96,11 @@ def evaluate(model, dataloader):
     score = 0
     upper_bound = 0
     num_data = 0
+    predictions = []
 
     all_logits = []
     all_bias = []
-    for v, q, a, b in tqdm(dataloader, ncols=100, total=len(dataloader), desc="eval"):
+    for v, q, a, b, qid in tqdm(dataloader, total=len(dataloader), desc="eval"):
         v = Variable(v, volatile=True).cuda()
         q = Variable(q, volatile=True).cuda()
         pred, _ = model(v, None, q, None, None)
@@ -105,12 +111,18 @@ def evaluate(model, dataloader):
         upper_bound += (a.max(1)[0]).sum()
         num_data += pred.size(0)
         all_bias.append(b)
-
+        labels = torch.argmax(pred, 1) # argmax
+        for i in range(len(pred)):
+            ansid =  labels[i].item()
+            predictions.append({
+                "question_id": qid[i].item(),
+                "answer": dataloader.dataset.label2ans[ansid],
+            })
     score = score / len(dataloader.dataset)
     upper_bound = upper_bound / len(dataloader.dataset)
 
     results = dict(
-        score=score,
-        upper_bound=upper_bound,
+        score=score.item(),
+        upper_bound=upper_bound.item(),
     )
-    return results
+    return results, predictions

@@ -81,7 +81,7 @@ class ReweightByInvBias(DebiasLossFn):
 
 
 class BiasProduct(DebiasLossFn):
-    def __init__(self, smooth=True, smooth_init=-1, constant_smooth=0.0):
+    def __init__(self, smooth=True, smooth_init=-1, constant_smooth=0.0, bias_w=1.0):
         """
         :param smooth: Add a learned sigmoid(a) factor to the bias to smooth it
         :param smooth_init: How to initialize `a`
@@ -91,6 +91,7 @@ class BiasProduct(DebiasLossFn):
         self.constant_smooth = constant_smooth
         self.smooth_init = smooth_init
         self.smooth = smooth
+        self.bias_w =  bias_w
         if smooth:
             self.smooth_param = torch.nn.Parameter(
               torch.from_numpy(np.full((1,), smooth_init, dtype=np.float32)))
@@ -111,8 +112,8 @@ class BiasProduct(DebiasLossFn):
         log_prob, log_one_minus_prob = convert_sigmoid_logits_to_binary_logprobs(logits)
 
         # Add the bias
-        log_prob += bias_lp
-        log_one_minus_prob += bias_l_inv
+        log_prob += bias_lp * self.bias_w
+        log_one_minus_prob += bias_l_inv * self.bias_w
 
         # Re-normalize the factors in logspace
         log_prob, log_one_minus_prob = renormalize_binary_logits(log_prob, log_one_minus_prob)
@@ -123,7 +124,7 @@ class BiasProduct(DebiasLossFn):
 
 
 class LearnedMixin(DebiasLossFn):
-    def __init__(self, w, smooth=True, smooth_init=-1, constant_smooth=0.0):
+    def __init__(self, w, smooth=True, smooth_init=-1, constant_smooth=0.0, bias_w=1.0):
         """
         :param w: Weight of the entropy penalty
         :param smooth: Add a learned sigmoid(a) factor to the bias to smooth it
@@ -136,6 +137,7 @@ class LearnedMixin(DebiasLossFn):
         self.constant_smooth = constant_smooth
         self.bias_lin = torch.nn.Linear(1024, 1)
         self.smooth = smooth
+        self.bias_w = bias_w
         if self.smooth:
             self.smooth_param = torch.nn.Parameter(
               torch.from_numpy(np.full((1,), smooth_init, dtype=np.float32)))
@@ -164,7 +166,7 @@ class LearnedMixin(DebiasLossFn):
         log_probs = torch.stack([log_prob, log_one_minus_prob], 2)
 
         # Add the bias in
-        logits = bias + log_probs
+        logits = self.bias_w * bias + log_probs
 
         # Renormalize to get log probabilities
         log_prob, log_one_minus_prob = renormalize_binary_logits(logits[:, :, 0], logits[:, :, 1])

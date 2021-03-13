@@ -6,11 +6,12 @@ import sys
 import json
 import numpy as np
 import re
-import cPickle
-
+# import cPickle
+import pickle as cPickle
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dataset import Dictionary
 import utils
+from tqdm import tqdm
 
 
 contractions = {
@@ -136,13 +137,15 @@ def filter_answers(answers_dset, min_occurence):
     """This will change the answer to preprocessed version
     """
     occurence = {}
-    for ans_entry in answers_dset:
+    for ans_entry in tqdm(answers_dset):
         gtruth = ans_entry['multiple_choice_answer']
         gtruth = preprocess_answer(gtruth)
         if gtruth not in occurence:
             occurence[gtruth] = set()
         occurence[gtruth].add(ans_entry['question_id'])
-    for answer in occurence.keys():
+    
+    keys = list(occurence.keys())
+    for answer in keys:
         if len(occurence[answer]) < min_occurence:
             occurence.pop(answer)
 
@@ -243,7 +246,7 @@ def load_cp():
     with open(val_answer_file) as f:
         val_answers = json.load(f)  # ['annotations']
 
-    occurence = filter_answers(train_answers, 9)
+    occurence = filter_answers(train_answers, 8)
     ans2label = create_ans2label(occurence, 'trainval', "data/cp-cache")
     compute_target(train_answers, ans2label, 'train', "data/cp-cache")
     compute_target(val_answers, ans2label, 'val', "data/cp-cache")
@@ -252,15 +255,21 @@ def load_cp():
 def load_v2():
     train_answer_file = 'data/v2_mscoco_train2014_annotations.json'
     with open(train_answer_file) as f:
+        print("opening train annotations")
         train_answers = json.load(f)['annotations']
-
     val_answer_file = 'data/v2_mscoco_val2014_annotations.json'
     with open(val_answer_file) as f:
+        print("opening val annotations")
         val_answers = json.load(f)['annotations']
+    print("done")
+    
+    all_answers = train_answers + val_answers
+    occurence = filter_answers(all_answers, 9)
+    breakpoint()
 
-    occurence = filter_answers(train_answers, 9)
     ans2label = create_ans2label(occurence, 'trainval', "data/cache")
     compute_target(train_answers, ans2label, 'train', "data/cache")
+
     compute_target(val_answers, ans2label, 'val', "data/cache")
 
 

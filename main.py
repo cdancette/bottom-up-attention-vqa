@@ -1,6 +1,7 @@
 import argparse
 import json
-import cPickle as pickle
+# import cPickle as pickle
+import pickle
 from collections import defaultdict, Counter
 from os.path import dirname, join
 
@@ -13,6 +14,7 @@ from dataset import Dictionary, VQAFeatureDataset
 import base_model
 from train import train
 import utils
+import wandb
 
 from vqa_debias_loss_functions import *
 
@@ -37,10 +39,11 @@ def parse_args():
     parser.add_argument(
         '--eval_each_epoch', action="store_true",
         help="Evaluate every epoch, instead of at the end")
-
+    parser.add_argument("--bias-w", type=float, default=1.0, help="weight assigned to bias logits.")
+    # parser.add
     # Arguments from the original model, we leave this default, except we
     # set --epochs to 15 since the model maxes out its performance on VQA 2.0 well before then
-    parser.add_argument('--epochs', type=int, default=15)
+    parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--num_hid', type=int, default=1024)
     parser.add_argument('--model', type=str, default='baseline0_newatt')
     parser.add_argument('--output', type=str, default='saved_models/exp0')
@@ -52,7 +55,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-
     dictionary = Dictionary.load_from_file('data/dictionary.pkl')
     cp = not args.nocp
 
@@ -101,13 +103,13 @@ def main():
 
     # Add the loss_fn based our arguments
     if args.mode == "bias_product":
-        model.debias_loss_fn = BiasProduct()
+        model.debias_loss_fn = BiasProduct(bias_w=args.bias_w)
     elif args.mode == "none":
         model.debias_loss_fn = Plain()
     elif args.mode == "reweight":
         model.debias_loss_fn = ReweightByInvBias()
     elif args.mode == "learned_mixin":
-        model.debias_loss_fn = LearnedMixin(args.entropy_penalty)
+        model.debias_loss_fn = LearnedMixin(args.entropy_penalty, bias_w=args.bias_w)
     else:
         raise RuntimeError(args.mode)
 
@@ -123,13 +125,17 @@ def main():
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     torch.backends.cudnn.benchmark = True
+    
+    wandb.init("debias-vqa-clark")
+    wandb.config.update(args)
+
 
     # The original version uses multiple workers, but that just seems slower on my setup
-    train_loader = DataLoader(train_dset, batch_size, shuffle=True, num_workers=0)
-    eval_loader = DataLoader(eval_dset, batch_size, shuffle=False, num_workers=0)
+    train_loader = DataLoader(train_dset, batch_size, shuffle=True, num_workers=8)
+    eval_loader = DataLoader(eval_dset, batch_size, shuffle=False, num_workers=8)
 
     print("Starting training...")
-    train(model, train_loader, eval_loader, args.epochs, args.output, args.eval_each_epoch)
+    train(model, train_loader, eval_loader, args.epochs, args.output, eval_each_epoch=True)
 
 
 if __name__ == '__main__':

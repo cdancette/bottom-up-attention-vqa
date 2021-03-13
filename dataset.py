@@ -1,8 +1,12 @@
 from __future__ import print_function
 import os
 import json
-import cPickle
+# import cPickle
+import pickle as cPickle
 from collections import Counter
+from multimodal import features
+
+from multimodal.features import COCOBottomUpFeatures
 
 import numpy as np
 import utils
@@ -118,7 +122,8 @@ def _load_dataset(dataroot, name, img_id2val, cp=False):
 
 class VQAFeatureDataset(Dataset):
     def __init__(self, name, dictionary, dataroot='data', cp=False,
-                 use_hdf5=False, cache_image_features=False):
+                 use_hdf5=False, cache_image_features=False, 
+                 ):
         super(VQAFeatureDataset, self).__init__()
         assert name in ['train', 'val']
 
@@ -135,21 +140,24 @@ class VQAFeatureDataset(Dataset):
         self.dictionary = dictionary
         self.use_hdf5 = use_hdf5
 
-        if use_hdf5:
-            h5_path = os.path.join(dataroot, 'trainval36.hdf5')
-            self.hf = h5py.File(h5_path, 'r')
-            self.features = self.hf.get('image_features')
+        # if use_hdf5:
+        #     h5_path = os.path.join(dataroot, 'trainval36.hdf5')
+        #     self.hf = h5py.File(h5_path, 'r')
+        #     self.features = self.hf.get('image_features')
 
-            with open("data/trainval36_imgid2idx.pkl", "rb") as f:
-                imgid2idx = cPickle.load(f)
-        else:
-            imgid2idx = None
+        #     with open("data/trainval36_imgid2idx.pkl", "rb") as f:
+        #         imgid2idx = cPickle.load(f)
+        # else:
+        #     imgid2idx = None
+        imgid2idx = None
 
         self.entries = _load_dataset(dataroot, name, imgid2idx, cp=cp)
 
+        self.features = COCOBottomUpFeatures(features="trainval2014_36", dir_data="/local/dancette/data/multimodal")
+
         if cache_image_features:
             image_to_fe = {}
-            for entry in tqdm(self.entries, ncols=100, desc="caching-features"):
+            for entry in tqdm(self.entries, desc="caching-features"):
                 img_id = entry["image_id"]
                 if img_id not in image_to_fe:
                     if use_hdf5:
@@ -175,7 +183,7 @@ class VQAFeatureDataset(Dataset):
         This will add q_token in each entry of the dataset.
         -1 represent nil, and should be treated as padding_idx in embedding
         """
-        for entry in tqdm(self.entries, ncols=100, desc="tokenize"):
+        for entry in tqdm(self.entries, desc="tokenize"):
             tokens = self.dictionary.tokenize(entry['question'], False)
             tokens = tokens[:max_length]
             if len(tokens) < max_length:
@@ -186,7 +194,7 @@ class VQAFeatureDataset(Dataset):
             entry['q_token'] = tokens
 
     def tensorize(self):
-        for entry in tqdm(self.entries, ncols=100, desc="tensorize"):
+        for entry in tqdm(self.entries, desc="tensorize"):
             question = torch.from_numpy(np.array(entry['q_token']))
             entry['q_token'] = question
 
@@ -204,16 +212,22 @@ class VQAFeatureDataset(Dataset):
 
     def __getitem__(self, index):
         entry = self.entries[index]
-        if self.image_to_fe is not None:
-            features = self.image_to_fe[entry["image_id"]]
-        elif self.use_hdf5:
-            features = np.array(self.features[entry['image_idx']])
-            features = torch.from_numpy(features).view(36, 2048)
-        else:
-            features = np.fromfile("data/trainval_features/" + str(entry["image_id"]) + ".data", np.float32)
-            features = torch.from_numpy(features).view(36, 2048)
+        # breakpoint()
+        features = self.features[entry['image_id']]["features"]
+        features = torch.from_numpy(features).view(36, 2048)
+
+        # if self.image_to_fe is not None:
+            
+        #     # features = self.image_to_fe[entry["image_id"]]
+        # elif self.use_hdf5:
+        #     features = np.array(self.features[entry['image_idx']])
+        #     features = torch.from_numpy(features).view(36, 2048)
+        # else:
+        #     features = np.fromfile("data/trainval_features/" + str(entry["image_id"]) + ".data", np.float32)
+        #     features = torch.from_numpy(features).view(36, 2048)
 
         question = entry['q_token']
+        question_id  = entry["question_id"]
         answer = entry['answer']
         labels = answer['labels']
         scores = answer['scores']
@@ -222,9 +236,9 @@ class VQAFeatureDataset(Dataset):
             target.scatter_(0, labels, scores)
 
         if "bias" in entry:
-            return features, question, target, entry["bias"]
+            return features, question, target, entry["bias"], question_id
         else:
-            return features, question, target, 0
+            return features, question, target, 0, question_id
 
     def __len__(self):
         return len(self.entries)
